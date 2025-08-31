@@ -75,14 +75,14 @@ class Sequence(Node):
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
         prev = self
-        current_y = gy + 1
+        current_y = gy# + 1
         for child in self.children:
             last, child_gx, next_y = child.layout(gx, current_y)
             prev.edges.append((prev, child))
             prev = last
             current_y = next_y
         prev.edges.append((prev, merge))
-        merge.gx, merge.gy = gx, current_y
+        merge.gx, merge.gy = gx, current_y - 1
         return merge, gx, current_y + 1
 
 class Parallel(ForkNode):
@@ -150,7 +150,7 @@ class Repeat(ForkNode):
 
         widths = [c.measure_width() for c in self.children]
         total_width = max(widths) if widths else 1
-        start_x = gx - total_width // 2
+        start_x = gx; # - total_width // 2
 
         prev = self
         current_y = gy + 1
@@ -163,7 +163,7 @@ class Repeat(ForkNode):
             current_y = next_y
 
         prev.edges.append((prev, merge))
-        merge.edges.append((merge, self))  # optional loop
+        # merge.edges.append((merge, self))  # optional loop
         merge.gx, merge.gy = gx, current_y
         return merge, gx, current_y + 1
 
