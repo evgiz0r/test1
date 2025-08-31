@@ -1,0 +1,12 @@
+sequence {
+    select {
+        A;
+        B
+    }
+    select {
+        C;
+        D;
+        F;
+        E
+    }
+}
