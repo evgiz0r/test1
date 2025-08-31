@@ -82,8 +82,8 @@ class Sequence(Node):
             prev = last
             current_y = next_y
         prev.edges.append((prev, merge))
-        merge.gx, merge.gy = gx, current_y + 1
-        return merge, gx, current_y + 2
+        merge.gx, merge.gy = gx, current_y
+        return merge, gx, current_y + 1
 
 class Parallel(ForkNode):
     def __init__(self, name=None):
@@ -109,8 +109,8 @@ class Parallel(ForkNode):
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
 
-        merge.gx, merge.gy = gx, max_y + 1
-        return merge, gx, max_y + 2
+        merge.gx, merge.gy = gx, max_y
+        return merge, gx, max_y + 1
 
 class Select(ForkNode):
     def __init__(self, name=None):
@@ -136,8 +136,8 @@ class Select(ForkNode):
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
 
-        merge.gx, merge.gy = gx, max_y + 1
-        return merge, gx, max_y + 2
+        merge.gx, merge.gy = gx, max_y
+        return merge, gx, max_y + 1
 
 class Repeat(ForkNode):
     def __init__(self, name=None):
