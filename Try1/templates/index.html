@@ -23,15 +23,23 @@
       margin-top: 15px;
       cursor: grab;
     }
+    #nodeInfo {
+      margin-bottom: 20px;
+      font-size: 16px;
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 10px;
+      min-height: 40px;
+    }
   </style>
 </head>
 <body>
   <h2>Activity Graph Viewer</h2>
+  <div id="nodeInfo">Click a node to see info</div>
   <textarea id="pssInput" placeholder="Paste PSS text here"></textarea>
   <br>
   <button id="showBtn">Parse & Draw</button>
   <canvas id="graphCanvas"></canvas>
-  <div id="nodeInfo">Click a node to see info</div>
 
   <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

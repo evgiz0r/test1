@@ -16,6 +16,7 @@ class Node:
         self.gx = 0
         self.gy = 0
         self.id = next_node_id()
+        self.bbox = None  # (min_gx, max_gx, min_gy, max_gy)
 
     def add_child(self, child):
         self.children.append(child)
@@ -61,7 +62,7 @@ class ForkNode(Node):
 class Sequence(Node):
     def __init__(self, name=None):
         super().__init__(name or "Sequence")
-        self.merge = Merge(f"End_{self.name}")  # remove id=self.id
+        self.merge = Merge(f"End_{self.name}")
 
     def create_merge(self):
         return self.merge
@@ -72,34 +73,54 @@ class Sequence(Node):
         return max([c.measure_width() for c in self.children])
 
     def layout(self, gx, gy):
+        # Sequence node is visible at (gx, gy)
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
+        current_y = gy + 1
+        min_gx = max_gx = gx
+        min_gy = max_gy = gy
         prev = self
-        current_y = gy# + 1
         for child in self.children:
             last, child_gx, next_y = child.layout(gx, current_y)
             prev.edges.append((prev, child))
             prev = last
             current_y = next_y
+            # update bbox with child and child's bbox
+            min_gx = min(min_gx, child.gx)
+            max_gx = max(max_gx, child.gx)
+            min_gy = min(min_gy, child.gy)
+            max_gy = max(max_gy, child.gy)
+            if hasattr(child, "bbox") and child.bbox:
+                cminx, cmaxx, cminy, cmaxy = child.bbox
+                min_gx = min(min_gx, cminx)
+                max_gx = max(max_gx, cmaxx)
+                min_gy = min(min_gy, cminy)
+                max_gy = max(max_gy, cmaxy)
         prev.edges.append((prev, merge))
-        merge.gx, merge.gy = gx, current_y - 1
+        merge.gx, merge.gy = gx, current_y
+        # bounding box includes sequence node, merge node, children, and their bboxes
+        min_gx = min(min_gx, merge.gx, self.gx)
+        max_gx = max(max_gx, merge.gx, self.gx)
+        min_gy = min(min_gy, merge.gy, self.gy)
+        max_gy = max(max_gy, merge.gy, self.gy)
+        # expand bbox by 1 to the left and 1 up
+        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
         return merge, gx, current_y + 1
 
 class Parallel(ForkNode):
     def __init__(self, name=None):
         super().__init__(name or "Parallel")
-        #self.merge = Merge(f"End_{self.name}", id=self.id)
 
     def layout(self, gx, gy):
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
-
         widths = [c.measure_width() for c in self.children]
         total_width = sum(widths) + (len(widths)-1)
         start_x = gx - total_width // 2
-
         current_x = start_x
         max_y = gy
+        min_gx = max_gx = gx
+        min_gy = max_gy = gy
         for i, child in enumerate(self.children):
             cw = widths[i]
             child_center_x = current_x + cw // 2
@@ -108,25 +129,40 @@ class Parallel(ForkNode):
             last.edges.append((last, merge))
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
-
+            # update bbox with child and child's bbox
+            min_gx = min(min_gx, child.gx)
+            max_gx = max(max_gx, child.gx)
+            min_gy = min(min_gy, child.gy)
+            max_gy = max(max_gy, child.gy)
+            if hasattr(child, "bbox") and child.bbox:
+                cminx, cmaxx, cminy, cmaxy = child.bbox
+                min_gx = min(min_gx, cminx)
+                max_gx = max(max_gx, cmaxx)
+                min_gy = min(min_gy, cminy)
+                max_gy = max(max_gy, cmaxy)
         merge.gx, merge.gy = gx, max_y
+        min_gx = min(min_gx, merge.gx, self.gx)
+        max_gx = max(max_gx, merge.gx, self.gx)
+        min_gy = min(min_gy, merge.gy, self.gy)
+        max_gy = max(max_gy, merge.gy, self.gy)
+        # expand bbox by 1 to the left and 1 up
+        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
         return merge, gx, max_y + 1
 
 class Select(ForkNode):
     def __init__(self, name=None):
         super().__init__(name or "Select")
-        #self.merge = Merge(f"End_{self.name}", id=self.id)
 
     def layout(self, gx, gy):
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
-
         widths = [c.measure_width() for c in self.children]
         total_width = sum(widths) + (len(widths)-1)
         start_x = gx - total_width // 2
-
         current_x = start_x
         max_y = gy
+        min_gx = max_gx = gx
+        min_gy = max_gy = gy
         for i, child in enumerate(self.children):
             cw = widths[i]
             child_center_x = current_x + cw // 2
@@ -135,36 +171,67 @@ class Select(ForkNode):
             last.edges.append((last, merge))
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
-
+            # update bbox with child and child's bbox
+            min_gx = min(min_gx, child.gx)
+            max_gx = max(max_gx, child.gx)
+            min_gy = min(min_gy, child.gy)
+            max_gy = max(max_gy, child.gy)
+            if hasattr(child, "bbox") and child.bbox:
+                cminx, cmaxx, cminy, cmaxy = child.bbox
+                min_gx = min(min_gx, cminx)
+                max_gx = max(max_gx, cmaxx)
+                min_gy = min(min_gy, cminy)
+                max_gy = max(max_gy, cmaxy)
         merge.gx, merge.gy = gx, max_y
+        min_gx = min(min_gx, merge.gx, self.gx)
+        max_gx = max(max_gx, merge.gx, self.gx)
+        min_gy = min(min_gy, merge.gy, self.gy)
+        max_gy = max(max_gy, merge.gy, self.gy)
+        # expand bbox by 1 to the left and 1 up
+        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
         return merge, gx, max_y + 1
 
 class Repeat(ForkNode):
     def __init__(self, name=None):
         super().__init__(name or "Repeat")
-        #self.merge = Merge(f"End_{self.name}", id=self.id)
 
     def layout(self, gx, gy):
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
-
         widths = [c.measure_width() for c in self.children]
         total_width = max(widths) if widths else 1
-        start_x = gx; # - total_width // 2
-
+        start_x = gx
         prev = self
         current_y = gy + 1
+        min_gx = max_gx = gx
+        min_gy = max_gy = gy
         for i, child in enumerate(self.children):
             cw = widths[i] if widths else 1
-            child_center_x = start_x  # stack vertically in same column
+            child_center_x = start_x
             last, _, next_y = child.layout(child_center_x, current_y)
             prev.edges.append((prev, child))
             prev = last
             current_y = next_y
-
+            # update bbox with child and child's bbox
+            min_gx = min(min_gx, child.gx)
+            max_gx = max(max_gx, child.gx)
+            min_gy = min(min_gy, child.gy)
+            max_gy = max(max_gy, child.gy)
+            if hasattr(child, "bbox") and child.bbox:
+                cminx, cmaxx, cminy, cmaxy = child.bbox
+                min_gx = min(min_gx, cminx)
+                max_gx = max(max_gx, cmaxx)
+                min_gy = min(min_gy, cminy)
+                max_gy = max(max_gy, cmaxy)
         prev.edges.append((prev, merge))
-        # merge.edges.append((merge, self))  # optional loop
         merge.gx, merge.gy = gx, current_y
+        # bounding box includes repeat node, merge node, children, and their bboxes
+        min_gx = min(min_gx, merge.gx, self.gx)
+        max_gx = max(max_gx, merge.gx, self.gx)
+        min_gy = min(min_gy, merge.gy, self.gy)
+        max_gy = max(max_gy, merge.gy, self.gy)
+        # expand bbox by 1 to the left and 1 up
+        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
         return merge, gx, current_y + 1
 
 def collect_nodes_edges(node, nodes=None, edges=None, visited=None):
@@ -215,3 +282,7 @@ def build_tree_from_json(node_json):
         return rep
     else:
         raise ValueError(f"Unknown type: {t}")
+        for c in node_json["children"]:
+            sel.add_child(build_tree_from_json(c))
+        return sel
+            

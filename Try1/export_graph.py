@@ -2,19 +2,23 @@ import json
 from nodes import collect_nodes_edges, Node, Atomic, Start, End, Merge, Sequence, Parallel, Select, Repeat
 
 def export_graph_json(root: Node):
-    nodes, edges = collect_nodes_edges(root)  # collects everything recursively
+    nodes, edges = collect_nodes_edges(root)
     nodes_json = []
     edges_json = []
 
     for n in nodes:
         node_type = type(n).__name__.lower()
-        nodes_json.append({
+        node_dict = {
             "id": n.id,
             "name": n.name,
-            "type": n.__class__.__name__.lower(),
+            "type": node_type,
             "gx": n.gx,
             "gy": n.gy
-        })
+        }
+        # Add bbox for compound nodes (type string must be lowercase)
+        if node_type in ("parallel", "select", "repeat", "sequence") and getattr(n, "bbox", None):
+            node_dict["bbox"] = list(n.bbox)
+        nodes_json.append(node_dict)
 
     for e in edges:
         # edge = (start_node, end_node)

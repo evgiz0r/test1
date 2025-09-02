@@ -1,1 +1,0 @@
-select { A; sequence { B; repeat(3) { C; select { D;E;F }}} }

@@ -162,6 +162,30 @@ function renderGraph() {
 
   drawGrid();
   drawEdges();
+
+  // Highlight bbox if hovering over a compound node
+  if (
+    hoverNode &&
+    hoverNode.bbox &&
+    ["parallel", "select", "repeat", "sequence"].includes(hoverNode.type)
+  ) {
+    const [min_gx, max_gx, min_gy, max_gy] = hoverNode.bbox;
+    ctx.save();
+    ctx.strokeStyle = "#ff9800";
+    ctx.lineWidth = 4 / scale;
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.rect(
+      min_gx * CELL,
+      min_gy * CELL,
+      (max_gx - min_gx + 1) * CELL,
+      (max_gy - min_gy + 1) * CELL
+    );
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+    ctx.restore();
+  }
+
   drawNodes();
 
   ctx.restore();
@@ -222,8 +246,8 @@ function drawEdges() {
 
 function drawNodes() {
   nodes.forEach(n => {
-    // Keep sequence start/end in data (for edges) but don't draw their boxes/labels
-    if( n.type === "Sequence" || n.name === "End_Sequence") return;
+    // Don't draw sequence start/end markers
+    if (n.type === "sequence" && (n.name === "start" || n.name === "end")) return;
     const x = n.gx * CELL;
     const y = n.gy * CELL;
     const w = CELL * 0.9;
@@ -233,8 +257,8 @@ function drawNodes() {
     ctx.beginPath();
     roundRect(ctx, x - w/2, y - h/2, w, h, r);
     ctx.fillStyle =
-      (n === selectedNode) ? '#4cafef' :
-      (n === hoverNode)    ? '#ffec99' :
+      (selectedNode && selectedNode.id === n.id) ? '#4cafef' :
+      (hoverNode && hoverNode.id === n.id) ? '#ffec99' :
       (typeColors[n.type] || '#ffffff');
     ctx.fill();
 
@@ -242,7 +266,7 @@ function drawNodes() {
     ctx.lineWidth = 2 / scale;
     ctx.stroke();
 
-    // label
+    // Always show label for all nodes except sequence start/end
     ctx.fillStyle = '#000';
     ctx.font = `${Math.max(12, h * 0.4)}px sans-serif`;
     ctx.textAlign = 'center';
@@ -257,14 +281,47 @@ function hitTest(sx, sy) {
   // Convert screen -> model
   const { mx, my } = screenToModel(sx, sy);
 
-  return nodes.find(n => {
-    if (n.type === 'sequence' && (n.name === 'start' || n.name === 'end')) return false;
+  // First, check atomic/regular nodes (so they are clickable even inside compound bbox)
+  const atomicOrRegular = nodes.find(n => {
+    if (n.type === "sequence" && (n.name === "start" || n.name === "end")) return false;
     const x = n.gx * CELL;
     const y = n.gy * CELL;
     const w = CELL * 0.9;
     const h = CELL * 0.5;
-    return mx >= x - w/2 && mx <= x + w/2 && my >= y - h/2 && my <= y + h/2;
-  }) || null;
+    return (
+      mx >= x - w / 2 &&
+      mx <= x + w / 2 &&
+      my >= y - h / 2 &&
+      my <= y + h / 2
+    );
+  });
+  if (atomicOrRegular) return atomicOrRegular;
+
+  // Otherwise, check compound nodes by bbox (larger area)
+  const compoundMatches = nodes.filter(n =>
+    n.bbox &&
+    ["parallel", "select", "repeat", "sequence"].includes(n.type) &&
+    (() => {
+      const [min_gx, max_gx, min_gy, max_gy] = n.bbox;
+      const x1 = min_gx * CELL, x2 = (max_gx + 1) * CELL;
+      const y1 = min_gy * CELL, y2 = (max_gy + 1) * CELL;
+      return mx >= x1 && mx <= x2 && my >= y1 && my <= y2;
+    })()
+  );
+
+  if (compoundMatches.length > 0) {
+    // Pick the deepest (smallest area) compound node
+    compoundMatches.sort((a, b) => {
+      const [aminx, amaxx, aminy, amaxy] = a.bbox;
+      const [bminx, bmaxx, bminy, bmaxy] = b.bbox;
+      const aArea = (amaxx - aminx + 1) * (amaxy - aminy + 1);
+      const bArea = (bmaxx - bminx + 1) * (bmaxy - bminy + 1);
+      return aArea - bArea;
+    });
+    return compoundMatches[0];
+  }
+
+  return null;
 }
 
 function showNodeInfo(node) {
@@ -295,3 +352,4 @@ function roundRect(c, x, y, w, h, r) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
