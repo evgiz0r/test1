@@ -30,14 +30,7 @@ def create_graph_from_pss_text(pss_text):
 
     return export_graph_json(start_node)
 
-@app.route("/update", methods=["POST"])
-def update_graph():
-    data = request.get_json()
-    pss_text = data.get("pss", "")
-    graph_json = create_graph_from_pss_text(pss_text)
-    return jsonify(graph_json)
-
-@app.route("/data_from_text", methods=["POST"])
+@app.route("/parse", methods=["POST"])
 def graph_from_text():
     data = request.get_json()
     text = data.get("text", "")
@@ -55,7 +48,10 @@ def graph_from_text():
     last_node.edges.append((last_node, end_node))
 
     graph = export_graph_json(start_node)
-    return jsonify(graph)
+    j = jsonify(graph)
+    print(j)
+    return j
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True)    
+    

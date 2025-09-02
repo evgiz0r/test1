@@ -1,213 +1,297 @@
+// static/js/graph.js
+let canvas, ctx;
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const cell_size = 80;
-const margin = 50;
+// Data
+let nodes = [];
+let edges = []; // normalized to [{from, to}]
 
-let nodes = [], edges = [];
-let scale = 1, offsetX = 0, offsetY = 0;
+// Layout constants (model space is in "graph pixels")
+const CELL = 80;
+const MARGIN = 40;
+
+// View transform (screen = offset + scale * model)
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+
+// Interaction
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
 let hoverNode = null;
+let selectedNode = null;
 
 const typeColors = {
-  atomic: '#4a90e2',
-  parallel: '#50e3c2',
-  select: '#f5a623',
-  repeat: '#bd10e0',
-  start: '#7ed321',
-  end: '#d0021b',
-  merge: '#f8e71c',
+  atomic:  '#4a90e2',
+  parallel:'#50e3c2',
+  select:  '#f5a623',
+  repeat:  '#bd10e0',
+  start:   '#7ed321',
+  end:     '#d0021b',
+  merge:   '#f8e71c'
 };
 
-function fetchGraph(text) {
-  return fetch('/data_from_text', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
-  })
-  .then(r => r.json());
+// ---------- Public API ----------
+
+export function initGraph(canvasElement) {
+  canvas = canvasElement;
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    // keep current view – no refit to avoid snapping while user interacts
+    renderGraph();
+  });
+
+  // Panning
+  canvas.addEventListener('mousedown', (e) => {
+    isPanning = true;
+    panStartX = e.clientX - offsetX;
+    panStartY = e.clientY - offsetY;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (isPanning) {
+      offsetX = e.clientX - panStartX;
+      offsetY = e.clientY - panStartY;
+      renderGraph();
+    } else {
+      hoverNode = hitTest(mx, my);
+      renderGraph();
+    }
+  });
+
+  ['mouseup', 'mouseleave'].forEach(ev =>
+    canvas.addEventListener(ev, () => {
+      isPanning = false;
+      canvas.style.cursor = 'grab';
+    })
+  );
+
+  // Mouse-centered zoom
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left; // screen x
+    const sy = e.clientY - rect.top;  // screen y
+
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    const newScale = clamp(scale * zoomFactor, 0.02, 2);
+
+    // Convert screen -> model at the cursor BEFORE scaling
+    const { mx, my } = screenToModel(sx, sy);
+
+    // Keep the point under the cursor stable: sx = offsetX + newScale * mx
+    offsetX = sx - newScale * mx;
+    offsetY = sy - newScale * my;
+    scale = newScale;
+
+    renderGraph();
+  }, { passive: false });
+
+  // Click -> select
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    selectedNode = hitTest(sx, sy);
+    showNodeInfo(selectedNode);
+    renderGraph();
+  });
 }
 
-function computeScaleAndOffset() {
-  if(nodes.length===0) return;
-  const minX = Math.min(...nodes.map(n=>n.gx));
-  const maxX = Math.max(...nodes.map(n=>n.gx));
-  const minY = Math.min(...nodes.map(n=>n.gy));
-  const maxY = Math.max(...nodes.map(n=>n.gy));
+export function updateGraph(newNodes, newEdges) {
+  
+  nodes = Array.isArray(newNodes) ? newNodes : [];
 
-  const availableWidth = canvas.width - 2*margin;
-  const availableHeight = canvas.height - 2*margin;
+  // Normalize edges to [{from,to}]
+  edges = (Array.isArray(newEdges) ? newEdges : []).map(e => {
+    if (Array.isArray(e) && e.length >= 2) return { from: e[0], to: e[1] };
+    if ('from' in e && 'to' in e) return { from: e.from, to: e.to };
+    if ('source' in e && 'target' in e) return { from: e.source, to: e.target };
+    return null;
+  }).filter(Boolean);
 
-  const graphWidth = maxX - minX + 1;
-  const graphHeight = maxY - minY + 1;
+  // Fit view to graph (center & scale to margins)
+  fitToGraph();
+  renderGraph();
+}
 
-  scale = Math.min(availableWidth / (graphWidth * cell_size),
-                   availableHeight / (graphHeight * cell_size),
-                   1);
+// ---------- Rendering ----------
 
-  offsetX = margin + (availableWidth - graphWidth*cell_size*scale)/2 - minX*cell_size*scale;
-  offsetY = margin + (availableHeight - graphHeight*cell_size*scale)/2 - minY*cell_size*scale;
+function resizeCanvas() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+
+function fitToGraph() {
+  if (!nodes.length) return;
+
+  const minGX = Math.min(...nodes.map(n => n.gx));
+  const maxGX = Math.max(...nodes.map(n => n.gx));
+  const minGY = Math.min(...nodes.map(n => n.gy));
+  const maxGY = Math.max(...nodes.map(n => n.gy));
+
+  const graphW = (maxGX - minGX + 1) * CELL;
+  const graphH = (maxGY - minGY + 1) * CELL;
+
+  const s = Math.min(
+    (canvas.width  - 2 * MARGIN) / graphW,
+    (canvas.height - 2 * MARGIN) / graphH,
+    1
+  );
+
+  scale = s;
+  offsetX = MARGIN - s * (minGX * CELL);
+  offsetY = MARGIN - s * (minGY * CELL);
+}
+
+function renderGraph() {
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+
+  drawGrid();
+  drawEdges();
+  drawNodes();
+
+  ctx.restore();
 }
 
 function drawGrid() {
+  if (!nodes.length) return;
+
+  // Draw grid across the visible viewport
+  const { mx: minMX, my: minMY } = screenToModel(0, 0);
+  const { mx: maxMX, my: maxMY } = screenToModel(canvas.width, canvas.height);
+
+  const startGX = Math.floor(minMX / CELL) - 1;
+  const endGX   = Math.ceil (maxMX / CELL) + 1;
+  const startGY = Math.floor(minMY / CELL) - 1;
+  const endGY   = Math.ceil (maxMY / CELL) + 1;
+
   ctx.strokeStyle = '#eee';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 / scale;
 
-  if(nodes.length===0) return;
-  const minX = Math.min(...nodes.map(n=>n.gx));
-  const maxX = Math.max(...nodes.map(n=>n.gx));
-  const minY = Math.min(...nodes.map(n=>n.gy));
-  const maxY = Math.max(...nodes.map(n=>n.gy));
-
-  for(let gx = minX; gx <= maxX; gx++){
-    const x = offsetX + gx*cell_size*scale;
+  for (let gx = startGX; gx <= endGX; gx++) {
+    const x = gx * CELL;
     ctx.beginPath();
-    ctx.moveTo(x, offsetY + minY*cell_size*scale);
-    ctx.lineTo(x, offsetY + maxY*cell_size*scale);
+    ctx.moveTo(x, startGY * CELL);
+    ctx.lineTo(x, endGY * CELL);
     ctx.stroke();
   }
-  for(let gy = minY; gy <= maxY; gy++){
-    const y = offsetY + gy*cell_size*scale;
+  for (let gy = startGY; gy <= endGY; gy++) {
+    const y = gy * CELL;
     ctx.beginPath();
-    ctx.moveTo(offsetX + minX*cell_size*scale, y);
-    ctx.lineTo(offsetX + maxX*cell_size*scale, y);
+    ctx.moveTo(startGX * CELL, y);
+    ctx.lineTo(endGX * CELL, y);
     ctx.stroke();
   }
 }
 
 function drawEdges() {
-  ctx.strokeStyle = '#555';
-  ctx.lineWidth = 2;
-  edges.forEach(e=>{
-    const start = nodes.find(n=>n.id===e[0]);
-    const end = nodes.find(n=>n.id===e[1]);
-    if(!start || !end) return;
+  ctx.strokeStyle = "#555";
+  ctx.lineWidth = 2 / scale; // keep line width consistent
+
+  edges.forEach(e => {
+    const src = nodes.find(n => n.id === e.from || n.id === e.source);
+    const dst = nodes.find(n => n.id === e.to   || n.id === e.target);
+
+    if (!src || !dst) {
+      console.warn("Edge skipped (missing src/dst):", e);
+      return;
+    }
+
     ctx.beginPath();
-    ctx.moveTo(offsetX + start.gx*cell_size*scale, offsetY + start.gy*cell_size*scale);
-    ctx.lineTo(offsetX + end.gx*cell_size*scale, offsetY + end.gy*cell_size*scale);
+    // Only use node gx/gy * CELL — offset & scale are already applied via ctx.transform
+    ctx.moveTo(src.gx * CELL, src.gy * CELL);
+    ctx.lineTo(dst.gx * CELL, dst.gy * CELL);
     ctx.stroke();
   });
 }
+
 
 function drawNodes() {
-  nodes.forEach(n=>{
-    const x = offsetX + n.gx*cell_size*scale;
-    const y = offsetY + n.gy*cell_size*scale;
-    const w = cell_size*0.8*scale;
-    const h = cell_size*0.5*scale;
-    const r = 10; // rounded corners
-    if (['Sequence', 'End_Sequence'].includes(n.name)) return;
-    // check hover
-    const isHover = (hoverNode && hoverNode.id === n.id);
+  nodes.forEach(n => {
+    // Keep sequence start/end in data (for edges) but don't draw their boxes/labels
+    if( n.type === "Sequence" || n.name === "End_Sequence") return;
+    const x = n.gx * CELL;
+    const y = n.gy * CELL;
+    const w = CELL * 0.9;
+    const h = CELL * 0.5;
+    const r = 12;
 
-    ctx.fillStyle = isHover ? '#ffec99' : (typeColors[n.type] || '#AAA');
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 2;
-
-    // rounded rectangle
     ctx.beginPath();
-    ctx.moveTo(x-w/2+r, y-h/2);
-    ctx.lineTo(x+w/2-r, y-h/2);
-    ctx.quadraticCurveTo(x+w/2, y-h/2, x+w/2, y-h/2+r);
-    ctx.lineTo(x+w/2, y+h/2-r);
-    ctx.quadraticCurveTo(x+w/2, y+h/2, x+w/2-r, y+h/2);
-    ctx.lineTo(x-w/2+r, y+h/2);
-    ctx.quadraticCurveTo(x-w/2, y+h/2, x-w/2, y+h/2-r);
-    ctx.lineTo(x-w/2, y-h/2+r);
-    ctx.quadraticCurveTo(x-w/2, y-h/2, x-w/2+r, y-h/2);
+    roundRect(ctx, x - w/2, y - h/2, w, h, r);
+    ctx.fillStyle =
+      (n === selectedNode) ? '#4cafef' :
+      (n === hoverNode)    ? '#ffec99' :
+      (typeColors[n.type] || '#ffffff');
     ctx.fill();
+
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2 / scale;
     ctx.stroke();
 
-    ctx.fillStyle = 'black';
-    ctx.font = `${h*0.5}px Inter, sans-serif`;
+    // label
+    ctx.fillStyle = '#000';
+    ctx.font = `${Math.max(12, h * 0.4)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(n.name, x, y);
+    ctx.fillText(n.name || n.type, x, y);
   });
 }
 
-function renderGraph() {
-  computeScaleAndOffset();
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawGrid();
-  drawEdges();
-  drawNodes();
+// ---------- Hit testing & helpers ----------
+
+function hitTest(sx, sy) {
+  // Convert screen -> model
+  const { mx, my } = screenToModel(sx, sy);
+
+  return nodes.find(n => {
+    if (n.type === 'sequence' && (n.name === 'start' || n.name === 'end')) return false;
+    const x = n.gx * CELL;
+    const y = n.gy * CELL;
+    const w = CELL * 0.9;
+    const h = CELL * 0.5;
+    return mx >= x - w/2 && mx <= x + w/2 && my >= y - h/2 && my <= y + h/2;
+  }) || null;
 }
 
-canvas.addEventListener('mousemove', (e)=>{
-  const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left);
-  const my = (e.clientY - rect.top);
-  let found = false;
-  const w_rect = cell_size*0.8*scale/2;
-  const h_rect = cell_size*0.5*scale/2;
-  for(let n of nodes){
-    const x = offsetX + n.gx*cell_size*scale;
-    const y = offsetY + n.gy*cell_size*scale;
-    if(mx >= x-w_rect && mx <= x+w_rect && my >= y-h_rect && my <= y+h_rect){
-      hoverNode = n;
-      found = true;
-      document.getElementById('info').innerText = `Node: ${n.name}, Type: ${n.type}`;
-      break;
-    }
-  }
-  if(!found){
-    hoverNode = null;
-    document.getElementById('info').innerText = 'Click a node to see info';
-  }
-  renderGraph();
-});
+function showNodeInfo(node) {
+  const el = document.getElementById('nodeInfo');
+  if (!el) return;
+  el.innerText = node
+    ? `Node: ${node.name || node.type}\nType: ${node.type}\nID: ${node.id}`
+    : 'Click a node to see info';
+}
 
-// auto load example graph on refresh
-window.addEventListener('load', ()=>{
-  fetchGraph(document.getElementById('activityText').value).then(graph=>{
-    nodes = graph.nodes;
-    edges = graph.edges;
-    renderGraph();
-  });
-});
+function screenToModel(sx, sy) {
+  return { mx: (sx - offsetX) / scale, my: (sy - offsetY) / scale };
+}
 
-// show button updates graph
-document.getElementById('showBtn').addEventListener('click', ()=>{
-  fetchGraph(document.getElementById('activityText').value).then(graph=>{
-    nodes = graph.nodes;
-    edges = graph.edges;
-    renderGraph();
-  });
-});
+function roundRect(c, x, y, w, h, r) {
+  const rr = Math.min(r, w/2, h/2);
+  c.beginPath();
+  c.moveTo(x + rr, y);
+  c.lineTo(x + w - rr, y);
+  c.quadraticCurveTo(x + w, y, x + w, y + rr);
+  c.lineTo(x + w, y + h - rr);
+  c.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  c.lineTo(x + rr, y + h);
+  c.quadraticCurveTo(x, y + h, x, y + h - rr);
+  c.lineTo(x, y + rr);
+  c.quadraticCurveTo(x, y, x + rr, y);
+  c.closePath();
+}
 
-
-canvas.addEventListener('mousedown', (e) => {
-    const mouseX = e.offsetX;
-    const mouseY = e.offsetY;
-  
-    // check if mouse is over any node
-    nodes.forEach(n => {
-      const x = offsetX + n.gx * cell_size * scale;
-      const y = offsetY + n.gy * cell_size * scale;
-      const w = cell_size * 0.8 * scale;
-      const h = cell_size * 0.5 * scale;
-  
-      if(mouseX >= x && mouseX <= x+w && mouseY >= y && mouseY <= y+h){
-        draggingNode = n;
-        dragOffsetX = mouseX - x;
-        dragOffsetY = mouseY - y;
-      }
-    });
-  });
-  
-  canvas.addEventListener('mousemove', (e) => {
-    if(draggingNode){
-      const mouseX = e.offsetX;
-      const mouseY = e.offsetY;
-  
-      // update node position in "grid units" or pixels
-      draggingNode.gx = (mouseX - dragOffsetX - offsetX) / (cell_size*scale);
-      draggingNode.gy = (mouseY - dragOffsetY - offsetY) / (cell_size*scale);
-  
-      drawAll(); // redraw the graph with updated node positions
-    }
-  });
-  
-  canvas.addEventListener('mouseup', () => {
-    draggingNode = null;
-  });
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
