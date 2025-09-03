@@ -235,8 +235,9 @@ function drawGrid() {
 }
 
 function drawEdges() {
-  ctx.strokeStyle = "#555";
-  ctx.lineWidth = 2 / scale; // keep line width consistent
+  // Softer edge color and thinner lines
+  ctx.strokeStyle = "rgba(80,80,80,0.45)";
+  ctx.lineWidth = 1.2 / scale;
 
   edges.forEach(e => {
     const src = nodes.find(n => n.id === e.from || n.id === e.source);
@@ -248,7 +249,6 @@ function drawEdges() {
     }
 
     ctx.beginPath();
-    // Only use node gx/gy * CELL — offset & scale are already applied via ctx.transform
     ctx.moveTo(src.gx * CELL, src.gy * CELL);
     ctx.lineTo(dst.gx * CELL, dst.gy * CELL);
     ctx.stroke();

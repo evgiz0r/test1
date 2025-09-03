@@ -127,7 +127,7 @@ def _layout_forklike(self, gx, gy):
             max_gy = max(max_gy, cmaxy)
     merge.gx, merge.gy = gx, max_y
     min_gx = min(min_gx, merge.gx, self.gx)
-    self.bbox = (min_gx - 1, max_gx, min_gy - 1, merge.gy)
+    self.bbox = (min_gx, max_gx, min_gy - 1, merge.gy)
     return merge, gx, max_y + 1
 
 def _layout_sequential(self, gx, gy):
