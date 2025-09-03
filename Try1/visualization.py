@@ -1,6 +1,6 @@
 # ---- visualization.py ----
 import pygame
-from nodes import Node, Atomic, Start, End, ForkNode, Parallel, Select, Repeat, Merge, Sequence
+from nodes import Node, Atomic, Start, End, ForkNode, Parallel, Select, Repeat, Merge, Sequence, CompoundAction
 
 def compute_bounds(nodes):
     xs = [n.gx for n in nodes]
@@ -50,8 +50,7 @@ def draw_node(screen, node, bounds, cell_size, margin, zoom):
     pygame.font.init()  # Ensure font module is initialized
 
     sx, sy = grid_to_screen(node, bounds, cell_size, margin, zoom)
-
-    NODE_SIZE = int(cell_size * zoom * 0.5)  # scale node size with zoom
+    NODE_SIZE = int(cell_size * zoom * 0.5)
     rect = pygame.Rect(0, 0, NODE_SIZE, NODE_SIZE)
     rect.center = (sx, sy)
 
@@ -80,21 +79,26 @@ def draw_node(screen, node, bounds, cell_size, margin, zoom):
     elif isinstance(node, Atomic):
         color = (200, 200, 255)
         caption = f"{node.name}[{node.id}]"
+    elif isinstance(node, CompoundAction):
+        color = (255, 220, 120)
+        caption = f"Action[{node.name}][{node.id}]"
+        # Draw bounding box for the container
+        if node.bbox:
+            min_gx, max_gx, min_gy, max_gy = node.bbox
+            min_sx = margin + (min_gx - bounds[0]) * cell_size * zoom
+            min_sy = margin + (min_gy - bounds[2]) * cell_size * zoom
+            max_sx = margin + (max_gx - bounds[0]) * cell_size * zoom + cell_size * zoom
+            max_sy = margin + (max_gy - bounds[2]) * cell_size * zoom + cell_size * zoom
+            box_rect = pygame.Rect(min_sx, min_sy, max_sx - min_sx, max_sy - min_sy)
+            pygame.draw.rect(screen, (255, 220, 120), box_rect, 3)  # thick border for container
     else:
         color = (200, 200, 255)
         caption = f"A[{node.id}]"
 
-    # Draw only the border, not filled
-    pygame.draw.rect(screen, color, rect, 0)  # fill for contrast (optional, see below)
-    #pygame.draw.rect(screen, (0, 0, 0), rect, 3)  # thicker border
-
-    # Optionally, comment out the fill line above to have only borders:
-    #pygame.draw.rect(screen, (0, 0, 0), rect, 3)  # only border, no fill
-
-    # Draw caption centered inside the node
+    pygame.draw.rect(screen, color, rect, 0)
     font_size = max(18, NODE_SIZE)
     font = pygame.font.SysFont(None, font_size, bold=True)
-    text = font.render(caption, True, (20, 20, 20))  # dark text for contrast
+    text = font.render(caption, True, (20, 20, 20))
     text_rect = text.get_rect(center=rect.center)
     screen.blit(text, text_rect)
 

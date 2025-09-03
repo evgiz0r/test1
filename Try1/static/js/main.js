@@ -11,56 +11,15 @@ window.addEventListener("DOMContentLoaded", () => {
   // preload with a bigger example (~15 statements)
   textarea.value = `
 
-parallel {
-  repeat(3) { A1; }
-  repeat(2) { A2; A3; }
-  select { B1; B2; B3; }
-  parallel {
-    C1; C2; C3;
-  }
-  select {
-    D1; D2; D3; D4;
-  }
-  repeat(4) { E1; }
+action B {}
+action A {
+activity {
+  parallel {B; B}; repeat(3) {B; B}}
+};
 }
-parallel {
-  repeat(3) { A1; }
-  repeat(2) { A2; A3; }
-  select { B1; B2; B3; }
-  parallel {
-    C1; C2; C3;
-  }
-  select {
-    D1; D2; D3; D4;
-  }
-  repeat(4) { E1;
-parallel {
-  repeat(3) { A1; }
-  repeat(2) { A2; A3; }
-  select { B1; B2; B3; }
-  parallel {
-    C1; C2; C3;
-  }
-  select {
-    D1; D2; D3; D4;
-parallel {
-  repeat(3) { A1; }
-  repeat(2) { A2; A3; }
-  select { B1; B2; B3; }
-  parallel {
-    C1; C2; C3;
-  }
-  select {
-    D1; D2; D3; D4;
-  }
-  repeat(4) { E1; }
-}
-
-  }
-  repeat(4) { E1; }
-}
- }
-}
+action test {
+activity { A; select {A; A} }
+};
 
 `;
 

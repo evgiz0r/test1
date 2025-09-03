@@ -1,20 +1,20 @@
 # parser.py
 import re
 
+
 def parse_activity_text(text):
     """
-    Parses textual PSS activity into JSON format.
-    Supports: select { ... }, sequence { ... }, repeat(n) { ... }, atomic nodes.
-    Ignores extra whitespace and supports multiline input.
-    Collects warnings for parse errors.
+    Parses textual activity definitions into a JSON-like structure.
+    Supports: action <name> { ... }, referencing actions, operators, atomic nodes.
     """
-    # Normalize whitespace: remove leading/trailing, collapse multiple spaces/newlines
+    # Normalize whitespace and split into statements
     text = re.sub(r'[ \t\r\f\v]+', ' ', text)
     text = re.sub(r'\n+', ' ', text)
     text = text.strip()
     pos = 0
     length = len(text)
     warnings = []
+    actions = {}
 
     def skip_whitespace():
         nonlocal pos
@@ -26,9 +26,8 @@ def parse_activity_text(text):
         skip_whitespace()
         match = re.match(r'[a-zA-Z0-9_]+', text[pos:])
         if not match:
-            # Instead of raising, skip to next semicolon or brace
             next_pos = pos
-            while next_pos < length and text[next_pos] not in [';', '}']:
+            while next_pos < length and text[next_pos] not in [';', '}', '{']:
                 next_pos += 1
             warnings.append(f"Warning: Expected name at position {pos}, skipping invalid token.")
             pos = next_pos
@@ -51,7 +50,6 @@ def parse_activity_text(text):
     def parse_block():
         nonlocal pos
         children = []
-
         skip_whitespace()
         while pos < length and text[pos] != '}':
             skip_whitespace()
@@ -119,24 +117,57 @@ def parse_activity_text(text):
                 skip_whitespace()
                 if pos < length and text[pos] == '}':
                     pos += 1
+            elif text.startswith("activity", pos):
+                pos += len("activity")
+                skip_whitespace()
+                if pos >= length or text[pos] != '{':
+                    warnings.append(f"Warning: Expected '{{' after activity at position {pos}, skipping.")
+                    while pos < length and text[pos] != '}':
+                        pos += 1
+                    continue
+                pos += 1
+                block_children = parse_block()
+                children.append({"type": "activity", "children": block_children})
+                skip_whitespace()
+                if pos < length and text[pos] == '}':
+                    pos += 1
             else:
-                # atomic node
+                # Could be atomic or action reference
                 name = parse_name()
                 skip_whitespace()
                 if pos < length and text[pos] == ';':
                     pos += 1
                 if name:
-                    children.append({"type": "atomic", "name": name})
+                    children.append({"type": "ref", "name": name})
             skip_whitespace()
         return children
 
-    skip_whitespace()
-    if pos < length and text[pos] == '{':
-        pos += 1
-        result = parse_block()
-        return {"type": "sequence", "children": result, "warnings": warnings}
-    else:
-        return {"type": "sequence", "children": parse_block(), "warnings": warnings}
+    def parse_actions():
+        nonlocal pos
+        skip_whitespace()
+        while pos < length:
+            skip_whitespace()
+            if text.startswith("action", pos):
+                pos += len("action")
+                skip_whitespace()
+                action_name = parse_name()
+                skip_whitespace()
+                if pos < length and text[pos] == '{':
+                    pos += 1
+                    action_body = parse_block()
+                    actions[action_name] = {"type": "action", "name": action_name, "children": action_body}
+                    skip_whitespace()
+                    if pos < length and text[pos] == '}':
+                        pos += 1
+                else:
+                    warnings.append(f"Warning: Expected '{{' after action name at position {pos}.")
+            else:
+                # Skip unknown tokens
+                pos += 1
+        return actions
+
+    actions = parse_actions()
+    return {"actions": actions, "warnings": warnings}
 
 def parse_pss_file(file_path):
     try:

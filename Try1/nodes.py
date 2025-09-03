@@ -8,9 +8,11 @@ def next_node_id():
     _node_id_counter += 1
     return val
 
+
 class Node:
-    def __init__(self, name=None):
+    def __init__(self, name=None, node_type=None):
         self.name = name or "Node"
+        self.type = node_type or "node"
         self.children = []
         self.edges = []
         self.gx = 0
@@ -21,14 +23,43 @@ class Node:
     def add_child(self, child):
         self.children.append(child)
 
-    # width in grid units needed for this node and its children
     def measure_width(self):
-        return 1  # atomic or leaf node is 1 unit wide
+        return 1
 
-    # layout the node, return (last_node, center_x, bottom_y)
     def layout(self, gx, gy):
         self.gx, self.gy = gx, gy
         return self, gx, gy + 1
+
+class CompoundAction(Node):
+    def __init__(self, name=None):
+        super().__init__(name or "CompoundAction", node_type="action")
+
+    def measure_width(self):
+        if not self.children:
+            return 1
+        return max([c.measure_width() for c in self.children])
+
+    def layout(self, gx, gy):
+        self.gx, self.gy = gx, gy
+        min_gx = max_gx = gx
+        min_gy = max_gy = gy
+        current_y = gy + 1
+        for child in self.children:
+            last, child_gx, next_y = child.layout(gx, current_y)
+            self.edges.append((self, child))
+            current_y = next_y
+            min_gx = min(min_gx, child.gx)
+            max_gx = max(max_gx, child.gx)
+            min_gy = min(min_gy, child.gy)
+            max_gy = max(max_gy, child.gy)
+            if hasattr(child, "bbox") and child.bbox:
+                cminx, cmaxx, cminy, cmaxy = child.bbox
+                min_gx = min(min_gx, cminx)
+                max_gx = max(max_gx, cmaxx)
+                min_gy = min(min_gy, cminy)
+                max_gy = max(max_gy, cmaxy)
+        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        return self, gx, current_y
 
 class Atomic(Node):
     pass
@@ -255,7 +286,9 @@ def collect_nodes_edges(node, nodes=None, edges=None, visited=None):
 
 
 # Convert JSON to node objects
-def build_tree_from_json(node_json):
+
+
+def build_tree_from_json(node_json, action_map=None, skip_compound=True):
     t = node_json["type"]
     name = node_json.get("name")
     if t == "atomic":
@@ -263,26 +296,51 @@ def build_tree_from_json(node_json):
     elif t == "sequence":
         seq = Sequence(name)
         for c in node_json["children"]:
-            seq.add_child(build_tree_from_json(c))
+            seq.add_child(build_tree_from_json(c, action_map, skip_compound))
         return seq
     elif t == "parallel":
         par = Parallel(name)
         for c in node_json["children"]:
-            par.add_child(build_tree_from_json(c))
+            par.add_child(build_tree_from_json(c, action_map, skip_compound))
         return par
     elif t == "select":
         sel = Select(name)
         for c in node_json["children"]:
-            sel.add_child(build_tree_from_json(c))
+            sel.add_child(build_tree_from_json(c, action_map, skip_compound))
         return sel
     elif t == "repeat":
         rep = Repeat(name)
         for c in node_json["children"]:
-            rep.add_child(build_tree_from_json(c))
+            rep.add_child(build_tree_from_json(c, action_map, skip_compound))
         return rep
+    elif t == "activity":
+        # Treat activity as a sequence container
+        seq = Sequence(name or "activity")
+        for c in node_json["children"]:
+            seq.add_child(build_tree_from_json(c, action_map, skip_compound))
+        return seq
+    elif t == "action":
+        # If skip_compound is True, return children recursively (flatten)
+        if skip_compound:
+            # If there are children, return a sequence of them
+            if node_json.get("children"):
+                seq = Sequence(name or "action")
+                for c in node_json["children"]:
+                    seq.add_child(build_tree_from_json(c, action_map, skip_compound))
+                return seq
+            else:
+                return Sequence(name or "action")
+        else:
+            act = CompoundAction(name)
+            for c in node_json["children"]:
+                act.add_child(build_tree_from_json(c, action_map, skip_compound))
+            return act
+    elif t == "ref":
+        ref_name = node_json["name"]
+        if action_map and ref_name in action_map:
+            return build_tree_from_json(action_map[ref_name], action_map, skip_compound)
+        else:
+            return Atomic(ref_name)
     else:
         raise ValueError(f"Unknown type: {t}")
-        for c in node_json["children"]:
-            sel.add_child(build_tree_from_json(c))
-        return sel
             

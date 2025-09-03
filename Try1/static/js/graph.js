@@ -28,7 +28,9 @@ const typeColors = {
   repeat:  '#bd10e0',
   start:   '#7ed321',
   end:     '#d0021b',
-  merge:   '#f8e71c'
+  merge:   '#f8e71c',
+  compoundaction: '#ffdc78',
+  action: '#ffdc78'
 };
 
 // ---------- Public API ----------
@@ -167,7 +169,7 @@ function renderGraph() {
   if (
     hoverNode &&
     hoverNode.bbox &&
-    ["parallel", "select", "repeat", "sequence"].includes(hoverNode.type)
+    ["parallel", "select", "repeat", "sequence", "compoundaction", "action"].includes(hoverNode.type)
   ) {
     const [min_gx, max_gx, min_gy, max_gy] = hoverNode.bbox;
     ctx.save();
@@ -254,6 +256,25 @@ function drawNodes() {
     const h = CELL * 0.5;
     const r = 12;
 
+    // Draw bounding box for compound actions
+    if (n.bbox && ["compoundaction", "action"].includes(n.type)) {
+      const [min_gx, max_gx, min_gy, max_gy] = n.bbox;
+      ctx.save();
+      ctx.strokeStyle = typeColors[n.type] || '#ffdc78';
+      ctx.lineWidth = 5 / scale;
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.rect(
+        min_gx * CELL,
+        min_gy * CELL,
+        (max_gx - min_gx + 1) * CELL,
+        (max_gy - min_gy + 1) * CELL
+      );
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+      ctx.restore();
+    }
+
     ctx.beginPath();
     roundRect(ctx, x - w/2, y - h/2, w, h, r);
     ctx.fillStyle =
@@ -300,7 +321,7 @@ function hitTest(sx, sy) {
   // Otherwise, check compound nodes by bbox (larger area)
   const compoundMatches = nodes.filter(n =>
     n.bbox &&
-    ["parallel", "select", "repeat", "sequence"].includes(n.type) &&
+    ["parallel", "select", "repeat", "sequence", "compoundaction", "action"].includes(n.type) &&
     (() => {
       const [min_gx, max_gx, min_gy, max_gy] = n.bbox;
       const x1 = min_gx * CELL, x2 = (max_gx + 1) * CELL;
