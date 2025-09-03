@@ -44,21 +44,25 @@ class CompoundAction(Node):
         min_gx = max_gx = gx
         min_gy = max_gy = gy
         current_y = gy + 1
+        last_node = self
         for child in self.children:
             last, child_gx, next_y = child.layout(gx, current_y)
             self.edges.append((self, child))
             current_y = next_y
+            last_node = last
             min_gx = min(min_gx, child.gx)
             max_gx = max(max_gx, child.gx)
             min_gy = min(min_gy, child.gy)
             max_gy = max(max_gy, child.gy)
             if hasattr(child, "bbox") and child.bbox:
                 cminx, cmaxx, cminy, cmaxy = child.bbox
-                min_gx = min(min_gx, cminx)
+                min_gx = min(min_gx, cminx + 1)
                 max_gx = max(max_gx, cmaxx)
                 min_gy = min(min_gy, cminy)
                 max_gy = max(max_gy, cmaxy)
-        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        min_gx = min(min_gx, self.gx)
+        # Fix: lower the box 1 grid from the top and 2 grid from the bottom
+        self.bbox = (min_gx, max_gx, min_gy - 1, max_gy + 2)
         return self, gx, current_y
 
 class Atomic(Node):
@@ -104,38 +108,34 @@ class Sequence(Node):
         return max([c.measure_width() for c in self.children])
 
     def layout(self, gx, gy):
-        # Sequence node is visible at (gx, gy)
         self.gx, self.gy = gx, gy
         merge = self.create_merge()
         current_y = gy + 1
         min_gx = max_gx = gx
         min_gy = max_gy = gy
         prev = self
+        last_node = self
         for child in self.children:
             last, child_gx, next_y = child.layout(gx, current_y)
             prev.edges.append((prev, child))
             prev = last
+            last_node = last
             current_y = next_y
-            # update bbox with child and child's bbox
             min_gx = min(min_gx, child.gx)
             max_gx = max(max_gx, child.gx)
             min_gy = min(min_gy, child.gy)
             max_gy = max(max_gy, child.gy)
             if hasattr(child, "bbox") and child.bbox:
                 cminx, cmaxx, cminy, cmaxy = child.bbox
-                min_gx = min(min_gx, cminx)
+                min_gx = min(min_gx, cminx + 1)
                 max_gx = max(max_gx, cmaxx)
                 min_gy = min(min_gy, cminy)
                 max_gy = max(max_gy, cmaxy)
         prev.edges.append((prev, merge))
         merge.gx, merge.gy = gx, current_y
-        # bounding box includes sequence node, merge node, children, and their bboxes
         min_gx = min(min_gx, merge.gx, self.gx)
-        max_gx = max(max_gx, merge.gx, self.gx)
-        min_gy = min(min_gy, merge.gy, self.gy)
-        max_gy = max(max_gy, merge.gy, self.gy)
-        # expand bbox by 1 to the left and 1 up
-        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        # Fix: lower the box 1 grid from the top and 2 grid from the bottom
+        self.bbox = (min_gx, max_gx, min_gy - 1, max_gy + 2)
         return merge, gx, current_y + 1
 
 class Parallel(ForkNode):
@@ -152,6 +152,7 @@ class Parallel(ForkNode):
         max_y = gy
         min_gx = max_gx = gx
         min_gy = max_gy = gy
+        last_node = self
         for i, child in enumerate(self.children):
             cw = widths[i]
             child_center_x = current_x + cw // 2
@@ -160,24 +161,21 @@ class Parallel(ForkNode):
             last.edges.append((last, merge))
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
-            # update bbox with child and child's bbox
+            last_node = last
             min_gx = min(min_gx, child.gx)
             max_gx = max(max_gx, child.gx)
             min_gy = min(min_gy, child.gy)
             max_gy = max(max_gy, child.gy)
             if hasattr(child, "bbox") and child.bbox:
                 cminx, cmaxx, cminy, cmaxy = child.bbox
-                min_gx = min(min_gx, cminx)
+                min_gx = min(min_gx, cminx + 1)
                 max_gx = max(max_gx, cmaxx)
                 min_gy = min(min_gy, cminy)
                 max_gy = max(max_gy, cmaxy)
         merge.gx, merge.gy = gx, max_y
         min_gx = min(min_gx, merge.gx, self.gx)
-        max_gx = max(max_gx, merge.gx, self.gx)
-        min_gy = min(min_gy, merge.gy, self.gy)
-        max_gy = max(max_gy, merge.gy, self.gy)
-        # expand bbox by 1 to the left and 1 up
-        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        # Fix: lower the box 1 grid from the top and 2 grid from the bottom
+        self.bbox = (min_gx, max_gx, min_gy - 1, max_gy + 2)
         return merge, gx, max_y + 1
 
 class Select(ForkNode):
@@ -194,6 +192,7 @@ class Select(ForkNode):
         max_y = gy
         min_gx = max_gx = gx
         min_gy = max_gy = gy
+        last_node = self
         for i, child in enumerate(self.children):
             cw = widths[i]
             child_center_x = current_x + cw // 2
@@ -202,24 +201,21 @@ class Select(ForkNode):
             last.edges.append((last, merge))
             current_x += cw + 1
             max_y = max(max_y, child_end_y)
-            # update bbox with child and child's bbox
+            last_node = last
             min_gx = min(min_gx, child.gx)
             max_gx = max(max_gx, child.gx)
             min_gy = min(min_gy, child.gy)
             max_gy = max(max_gy, child.gy)
             if hasattr(child, "bbox") and child.bbox:
                 cminx, cmaxx, cminy, cmaxy = child.bbox
-                min_gx = min(min_gx, cminx)
+                min_gx = min(min_gx, cminx + 1)
                 max_gx = max(max_gx, cmaxx)
                 min_gy = min(min_gy, cminy)
                 max_gy = max(max_gy, cmaxy)
         merge.gx, merge.gy = gx, max_y
         min_gx = min(min_gx, merge.gx, self.gx)
-        max_gx = max(max_gx, merge.gx, self.gx)
-        min_gy = min(min_gy, merge.gy, self.gy)
-        max_gy = max(max_gy, merge.gy, self.gy)
-        # expand bbox by 1 to the left and 1 up
-        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        # Fix: lower the box 1 grid from the top and 2 grid from the bottom
+        self.bbox = (min_gx, max_gx, min_gy - 1, max_gy + 2)
         return merge, gx, max_y + 1
 
 class Repeat(ForkNode):
@@ -236,33 +232,30 @@ class Repeat(ForkNode):
         current_y = gy + 1
         min_gx = max_gx = gx
         min_gy = max_gy = gy
+        last_node = self
         for i, child in enumerate(self.children):
             cw = widths[i] if widths else 1
             child_center_x = start_x
             last, _, next_y = child.layout(child_center_x, current_y)
             prev.edges.append((prev, child))
             prev = last
+            last_node = last
             current_y = next_y
-            # update bbox with child and child's bbox
             min_gx = min(min_gx, child.gx)
             max_gx = max(max_gx, child.gx)
             min_gy = min(min_gy, child.gy)
             max_gy = max(max_gy, child.gy)
             if hasattr(child, "bbox") and child.bbox:
                 cminx, cmaxx, cminy, cmaxy = child.bbox
-                min_gx = min(min_gx, cminx)
+                min_gx = min(min_gx, cminx + 1)
                 max_gx = max(max_gx, cmaxx)
                 min_gy = min(min_gy, cminy)
                 max_gy = max(max_gy, cmaxy)
         prev.edges.append((prev, merge))
         merge.gx, merge.gy = gx, current_y
-        # bounding box includes repeat node, merge node, children, and their bboxes
         min_gx = min(min_gx, merge.gx, self.gx)
-        max_gx = max(max_gx, merge.gx, self.gx)
-        min_gy = min(min_gy, merge.gy, self.gy)
-        max_gy = max(max_gy, merge.gy, self.gy)
-        # expand bbox by 1 to the left and 1 up
-        self.bbox = (min_gx - 1, max_gx, min_gy - 1, max_gy)
+        # Fix: lower the box 1 grid from the top and 2 grid from the bottom
+        self.bbox = (min_gx, max_gx, min_gy - 1, max_gy + 2)
         return merge, gx, current_y + 1
 
 def collect_nodes_edges(node, nodes=None, edges=None, visited=None):
@@ -314,22 +307,32 @@ def build_tree_from_json(node_json, action_map=None, skip_compound=True):
             rep.add_child(build_tree_from_json(c, action_map, skip_compound))
         return rep
     elif t == "activity":
-        # Treat activity as a sequence container
-        seq = Sequence(name or "activity")
-        for c in node_json["children"]:
-            seq.add_child(build_tree_from_json(c, action_map, skip_compound))
-        return seq
+        # Do not create a redundant activity node, just return its children as a sequence if needed
+        children = node_json.get("children", [])
+        if len(children) == 1:
+            return build_tree_from_json(children[0], action_map, skip_compound)
+        elif children:
+            seq = Sequence(name or "activity")
+            for c in children:
+                seq.add_child(build_tree_from_json(c, action_map, skip_compound))
+            return seq
+        else:
+            return Sequence(name or "activity")
     elif t == "action":
-        # If skip_compound is True, return children recursively (flatten)
         if skip_compound:
-            # If there are children, return a sequence of them
-            if node_json.get("children"):
+            children = node_json.get("children", [])
+            if not children:
+                # atomic action, just return Atomic node
+                return Atomic(name)
+            elif len(children) == 1:
+                # single child, return it directly
+                return build_tree_from_json(children[0], action_map, skip_compound)
+            else:
+                # multiple children, wrap in sequence
                 seq = Sequence(name or "action")
-                for c in node_json["children"]:
+                for c in children:
                     seq.add_child(build_tree_from_json(c, action_map, skip_compound))
                 return seq
-            else:
-                return Sequence(name or "action")
         else:
             act = CompoundAction(name)
             for c in node_json["children"]:
@@ -343,4 +346,6 @@ def build_tree_from_json(node_json, action_map=None, skip_compound=True):
             return Atomic(ref_name)
     else:
         raise ValueError(f"Unknown type: {t}")
-            
+
+
+

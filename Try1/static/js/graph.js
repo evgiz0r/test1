@@ -42,70 +42,71 @@ export function initGraph(canvasElement) {
 
   window.addEventListener('resize', () => {
     resizeCanvas();
-    // keep current view – no refit to avoid snapping while user interacts
     renderGraph();
   });
 
-  // Panning
-  canvas.addEventListener('mousedown', (e) => {
-    isPanning = true;
-    panStartX = e.clientX - offsetX;
-    panStartY = e.clientY - offsetY;
-    canvas.style.cursor = 'grabbing';
-  });
+  // Only add event listeners if canvas is defined and supports addEventListener
+  if (canvas && typeof canvas.addEventListener === "function") {
+    // Panning
+    canvas.addEventListener('mousedown', (e) => {
+      isPanning = true;
+      panStartX = e.clientX - offsetX;
+      panStartY = e.clientY - offsetY;
+      canvas.style.cursor = 'grabbing';
+    });
 
-  canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      window._lastMouseModel = screenToModel(mx, my);
 
-    if (isPanning) {
-      offsetX = e.clientX - panStartX;
-      offsetY = e.clientY - panStartY;
+      if (isPanning) {
+        offsetX = e.clientX - panStartX;
+        offsetY = e.clientY - panStartY;
+        renderGraph();
+      } else {
+        hoverNode = hitTest(mx, my);
+        renderGraph();
+      }
+    });
+
+    ['mouseup', 'mouseleave'].forEach(ev =>
+      canvas.addEventListener(ev, () => {
+        isPanning = false;
+        canvas.style.cursor = 'grab';
+      })
+    );
+
+    // Mouse-centered zoom
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newScale = clamp(scale * zoomFactor, 0.02, 2);
+
+      const { mx, my } = screenToModel(sx, sy);
+
+      offsetX = sx - newScale * mx;
+      offsetY = sy - newScale * my;
+      scale = newScale;
+
       renderGraph();
-    } else {
-      hoverNode = hitTest(mx, my);
+    }, { passive: false });
+
+    // Click -> select
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      selectedNode = hitTest(sx, sy);
+      showNodeInfo(selectedNode);
       renderGraph();
-    }
-  });
-
-  ['mouseup', 'mouseleave'].forEach(ev =>
-    canvas.addEventListener(ev, () => {
-      isPanning = false;
-      canvas.style.cursor = 'grab';
-    })
-  );
-
-  // Mouse-centered zoom
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left; // screen x
-    const sy = e.clientY - rect.top;  // screen y
-
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = clamp(scale * zoomFactor, 0.02, 2);
-
-    // Convert screen -> model at the cursor BEFORE scaling
-    const { mx, my } = screenToModel(sx, sy);
-
-    // Keep the point under the cursor stable: sx = offsetX + newScale * mx
-    offsetX = sx - newScale * mx;
-    offsetY = sy - newScale * my;
-    scale = newScale;
-
-    renderGraph();
-  }, { passive: false });
-
-  // Click -> select
-  canvas.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    selectedNode = hitTest(sx, sy);
-    showNodeInfo(selectedNode);
-    renderGraph();
-  });
+    });
+  }
 }
 
 export function updateGraph(newNodes, newEdges) {
@@ -150,8 +151,9 @@ function fitToGraph() {
   );
 
   scale = s;
-  offsetX = MARGIN - s * (minGX * CELL);
-  offsetY = MARGIN - s * (minGY * CELL);
+  // Center the graph in the canvas
+  offsetX = (canvas.width - graphW * s) / 2 - minGX * CELL * s;
+  offsetY = (canvas.height - graphH * s) / 2 - minGY * CELL * s;
 }
 
 function renderGraph() {
@@ -165,27 +167,35 @@ function renderGraph() {
   drawGrid();
   drawEdges();
 
-  // Highlight bbox if hovering over a compound node
+  // Highlight bbox only if hovering close to the node center (within 1.5*CELL*scale)
   if (
     hoverNode &&
     hoverNode.bbox &&
     ["parallel", "select", "repeat", "sequence", "compoundaction", "action"].includes(hoverNode.type)
   ) {
-    const [min_gx, max_gx, min_gy, max_gy] = hoverNode.bbox;
-    ctx.save();
-    ctx.strokeStyle = "#ff9800";
-    ctx.lineWidth = 4 / scale;
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.rect(
-      min_gx * CELL,
-      min_gy * CELL,
-      (max_gx - min_gx + 1) * CELL,
-      (max_gy - min_gy + 1) * CELL
-    );
-    ctx.stroke();
-    ctx.globalAlpha = 1.0;
-    ctx.restore();
+    // Find the node center
+    const x = hoverNode.gx * CELL;
+    const y = hoverNode.gy * CELL;
+    // Mouse position in model coordinates
+    const mouse = window._lastMouseModel || { mx: x, my: y };
+    const dist = Math.sqrt((mouse.mx - x) ** 2 + (mouse.my - y) ** 2);
+    if (dist < 1.5 * CELL) {
+      const [min_gx, max_gx, min_gy, max_gy] = hoverNode.bbox;
+      ctx.save();
+      ctx.strokeStyle = "#ff9800";
+      ctx.lineWidth = 4 / scale;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.rect(
+        min_gx * CELL,
+        min_gy * CELL,
+        (max_gx - min_gx + 1) * CELL,
+        (max_gy - min_gy + 1) * CELL
+      );
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+      ctx.restore();
+    }
   }
 
   drawNodes();
@@ -373,4 +383,5 @@ function roundRect(c, x, y, w, h, r) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
 
